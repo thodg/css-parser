@@ -14,7 +14,7 @@
 	 (ib (make-array (if string
 			     (* 64 (ceiling length 64))
 			     64)
-			 :element-type 'character
+			 :element-type 'fixnum
 			 :adjustable t
 			 :fill-pointer 0)))
     (when string
@@ -54,9 +54,11 @@
 		    :initform -1
 		    :accessor parser-input-character
 		    :type fixnum)
+   (eof :initform nil
+	:accessor parser-eof)
    (ib :initform (make-input-buffer)
-	  :accessor parser-ib
-	  :type array)
+       :accessor parser-ib
+       :type array)
    (match-start :initform 0
 		:accessor parser-match-start
 		:type fixnum)
@@ -110,6 +112,59 @@
 (defgeneric cdo-token (parser))
 (defgeneric cdc-token (parser))
 
+;;  Parser input
+
+(defmethod ib-string ((ib array) (start fixnum) (end fixnum))
+  (let* ((length (- end start))
+	 (s (make-string length)))
+    (labels ((at (i j)
+	       (unless (= length j)
+		 (setf (char s j) (code-char (aref ib i)))
+		 (at (1+ i) (1+ j)))))
+      (at start 0))))
+    
+(defmethod ib-push-extend ((p parser) (c fixnum))
+  (let ((ib (parser-ib p)))
+    (let* ((fill-pointer (fill-pointer ib))
+	   (new-fill-pointer (1+ fill-pointer)))
+      (if (= fill-pointer (array-dimension ib 0))
+	  (setf (parser-ib p) (adjust-array ib (+ fill-pointer 64)
+					    :fill-pointer new-fill-pointer))
+	  (setf (fill-pointer ib) new-fill-pointer))
+      (locally (declare (optimize (safety 0)))
+	(setf (aref ib fill-pointer) c))
+      fill-pointer)))
+
+(defun read-char-code (stream)
+  (let ((c (read-char stream nil nil)))
+    (if c (char-code c) -1)))
+
+(defmethod input-char ((p parser))
+  (let* ((in (parser-input p))
+	 (c (read-char-code in))
+	 (pos (ib-push-extend p c)))
+    (cond ((or (and (= #x000A c)
+		    (not (and (< 0 pos)
+			      (= #x000D (aref (parser-ib p) (1- pos))))))
+	       (= #x000D c)
+	       (= #x000C c))
+	   (setf (parser-input-character p) 0)
+	   (incf (parser-input-line p)))
+	  (t
+	   (incf (parser-input-character p))))
+    c))
+
+(defmethod input-length ((p parser) (length fixnum))
+  (when (< (- (fill-pointer (parser-ib p))
+	      (parser-match-start p))
+	   length)
+    (input-char p)
+    (input-length p length)))
+
+(defmethod parser-match-char ((p parser) &optional (index 0))
+  (input-length p (1+ index))
+  (aref (parser-ib p) (+ (parser-match-start p) index)))
+
 ;;  Token stack
 
 (defmethod push-token ((p parser))
@@ -125,9 +180,9 @@
 	 (fill-pointer (fill-pointer ib))
 	 (token (pop (parser-token-stack p)))
 	 (match-start (parser-match-start p)))
-    (setf (token-string p) (subseq ib
-				   (token-start token)
-				   match-start))
+    (setf (token-string token) (ib-string ib
+					  (token-start token)
+					  match-start))
     (when (endp (parser-token-stack p))
       (replace ib ib :start2 match-start :end2 fill-pointer)
       (setf (parser-match-start p) 0
@@ -146,65 +201,44 @@
   (pop-token p)
   nil)
 
-;;  Parser input
-
-(defmethod ib-push-extend ((p parser) (c character))
-  (let ((ib (parser-ib p)))
-    (let* ((fill-pointer (fill-pointer ib))
-	   (new-fill-pointer (1+ fill-pointer)))
-      (if (= fill-pointer (array-dimension ib 0))
-	  (setf (parser-ib p) (adjust-array ib (+ fill-pointer 64)
-					    :fill-pointer new-fill-pointer))
-	  (setf (fill-pointer ib) new-fill-pointer))
-      (locally (declare (optimize (safety 0)))
-	(setf (aref ib fill-pointer) c))
-      fill-pointer)))
-
-(defmethod input-char ((p parser))
-  (let* ((in (parser-input p))
-	 (c (read-char in nil))
-	 (pos (ib-push-extend p c)))
-    (cond ((or (and (char= #\Newline c)
-		    (not (and (< 0 pos)
-			      (char= #\Return
-				     (char (parser-ib p) (1- pos))))))
-	       (char= #\Return c))
-	   (setf (parser-input-character p) 0)
-	   (incf (parser-input-line p)))
-	  (t
-	   (incf (parser-input-character p))))
-    c))
-
-(defmethod input-length ((p parser) (length fixnum))
-  (when (< (- (fill-pointer (parser-ib p))
-	      (parser-match-start p))
-	   length)
-    (input-char p)
-    (input-length p length)))
-
-(defmethod parser-match-char ((p parser) &optional (char 0))
-  (input-length p (1+ char))
-  (char (parser-ib p) (+ (parser-match-start p) char)))
-
 ;;  Pattern matching
+
+(defmethod ib= ((p parser) (s string) &key (start1 0))
+  (let ((ib (parser-ib p))
+	(end (length s)))
+    (when (<= end (- (fill-pointer ib) start1))
+      (locally (declare (optimize (safety 0)))
+	(labels ((at (m i)
+		   (declare (type fixnum m i))
+		   (cond ((= end i)
+			  t)
+			 ((= (aref ib m) (char-code (char s i)))
+			  (at (the fixnum (1+ m)) (the fixnum (1+ i))))
+			 (t
+			  nil))))
+	  (at start1 0))))))
 
 (defmethod match ((p parser) (s string))
   (input-length p (length s))
-  (when (string= (parser-ib p) s :start1 (parser-match-start p))
+  (when (ib= p s :start1 (parser-match-start p))
     (incf (parser-match-start p) (length s))))
 
-(defmethod match ((p parser) (c character))
-  (when (char= (parser-match-char p) c)
+(defmethod match ((p parser) (c fixnum))
+  (when (= (the fixnum (parser-match-char p)) c)
     (incf (parser-match-start p))))
+
+(defmethod match ((p parser) (c character))
+  (match p (char-code c)))
 
 (defmethod match-until ((p parser) (s string))
   (input-length p (length s))
   (labels ((maybe-eat ()
 	     (or (match p s)
-		 (progn
-		   (input-char p)
-		   (incf (parser-match-start p))
-		   (maybe-eat)))))
+		 (and (not (match p -1))
+		      (progn
+			(input-char p)
+			(incf (parser-match-start p))
+			(maybe-eat))))))
     (maybe-eat)))
 
 (defmethod match-option ((p parser) (f function))
@@ -218,7 +252,8 @@
     `(let* ((,parser ,p)
 	    (,match-start (parser-match-start ,parser))
 	    (,result (progn ,@body)))
-       (cond (,result
+       (cond ((or ,result
+		  (match p -1))
 	      (setf (parser-match-start ,parser) ,match-start)
 	      nil)
 	     (t
@@ -291,10 +326,10 @@
       (match-newline p)))
 
 (defmethod match-hex-digit ((p parser))
-  (let ((c (parser-match-char p)))
-    (when (or (char<= #\0 c #\9)
-	      (char<= #\a c #\f)
-	      (char<= #\A c #\F))
+  (let ((c (the fixnum (parser-match-char p))))
+    (when (or (<= (char-code #\0) c (char-code #\9))
+	      (<= (char-code #\a) c (char-code #\f))
+	      (<= (char-code #\A) c (char-code #\F)))
       (incf (parser-match-start p)))))
        
 (defmethod match-escape ((p parser))
@@ -321,13 +356,13 @@
 
 (defmethod match-ident-char ((p parser))
   (or (match-escape p)
-      (let ((c (parser-match-char p)))
-	(when (or (char<= #\a c #\z)
-		  (char<= #\A c #\Z)
-		  (char<= #\0 c #\9)
-		  (char= #\_ c)
-		  (char= #\- c)
-		  (< #x007F (char-code c)))
+      (let ((c (the fixnum (parser-match-char p))))
+	(when (or (<= (char-code #\a) c (char-code #\z))
+		  (<= (char-code #\A) c (char-code #\Z))
+		  (<= (char-code #\0) c (char-code #\9))
+		  (=  (char-code #\_) c)
+		  (=  (char-code #\-) c)
+		  (<  #x007F c))
 	  (incf (parser-match-start p))))))
 
 (defmethod match-ident-char* ((p parser))
@@ -338,11 +373,11 @@
     (push-token p)
     (match p #\-)
     (cond ((or (match-escape p)
-	       (let ((c (parser-match-char p)))
-		 (when (or (char<= #\a c #\z)
-			   (char<= #\A c #\Z)
-			   (char= #\_ c)
-			   (< #x007F (char-code c)))
+	       (let ((c (the fixnum (parser-match-char p))))
+		 (when (or (<= (char-code #\a) c (char-code #\z))
+			   (<= (char-code #\A) c (char-code #\Z))
+			   (=  (char-code #\_) c)
+			   (<  #x007F c))
 		   (incf (parser-match-start p)))))
 	   (match-ident-char* p)
 	   (make-token p 'ident-token))
@@ -422,10 +457,11 @@
 	:type token)))
 
 (defmethod match-non-printable ((p parser))
-  (let ((d (char-code (parser-match-char p))))
-    (when (or (<= #x0000 d #x001F)
-	      (=  #x007F d)
-	      (<= #x0080 d #x009F))
+  (let ((c (the fixnum (parser-match-char p))))
+    (when (or (<= #x0000 c #x0008)
+	      (=  #x000B c)
+	      (<= #x000E c #x001F)
+	      (=  #x007F c))
       (incf (parser-match-start p)))))
 
 (defmethod match-url-unquoted-char ((p parser))
@@ -462,8 +498,8 @@
 (defclass number-token (token) ())
 
 (defmethod match-digit ((p parser))
-  (let ((c (parser-match-char p)))
-    (when (char<= #\0 c #\9)
+  (let ((c (the fixnum (parser-match-char p))))
+    (when (<= (char-code #\0) c (char-code #\9))
       (incf (parser-match-start p)))))
 
 (defmethod match-digit+ ((p parser))
@@ -610,3 +646,154 @@
   (if (match p "-->")
       (make-token p 'cdc-token)
       (discard-token p)))
+
+(defclass left-paren-token (token) ())
+
+(defmethod left-paren-token ((p parser))
+  (push-token p)
+  (if (match p #\()
+      (make-token p 'left-paren-token)
+      (discard-token p)))
+
+(defclass right-paren-token (token) ())
+
+(defmethod right-paren-token ((p parser))
+  (push-token p)
+  (if (match p #\))
+      (make-token p 'right-paren-token)
+      (discard-token p)))
+
+(defclass comma-token (token) ())
+
+(defmethod comma-token ((p parser))
+  (push-token p)
+  (if (match p #\,)
+      (make-token p 'comma-token)
+      (discard-token p)))
+
+(defclass colon-token (token) ())
+
+(defmethod colon-token ((p parser))
+  (push-token p)
+  (if (match p #\:)
+      (make-token p 'colon-token)
+      (discard-token p)))
+
+(defclass semicolon-token (token) ())
+
+(defmethod semicolon-token ((p parser))
+  (push-token p)
+  (if (match p #\;)
+      (make-token p 'semicolon-token)
+      (discard-token p)))
+
+(defclass [-token (token) ())
+
+(defmethod [-token ((p parser))
+  (push-token p)
+  (if (match p #\[)
+      (make-token p '[-token)
+      (discard-token p)))
+
+(defclass ]-token (token) ())
+
+(defmethod ]-token ((p parser))
+  (push-token p)
+  (if (match p #\])
+      (make-token p ']-token)
+      (discard-token p)))
+
+(defclass {-token (token) ())
+
+(defmethod {-token ((p parser))
+  (push-token p)
+  (if (match p #\{)
+      (make-token p '{-token)
+      (discard-token p)))
+
+(defclass }-token (token) ())
+
+(defmethod }-token ((p parser))
+  (push-token p)
+  (if (match p #\})
+      (make-token p '}-token)
+      (discard-token p)))
+
+(defclass eof-token (token) ())
+
+(defmethod eof-token ((p parser))
+  (push-token p)
+  (if (match p -1)
+      (make-token p 'eof-token)
+      (discard-token p)))
+
+(defclass delim-token (token) ())
+
+(defmethod delim-token ((p parser))
+  (push-token p)
+  (input-length p 1)
+  (incf (parser-match-start p))
+  (make-token p 'delim-token))
+
+;;  Tokenizer
+
+(defmethod consume-token ((p parser))
+  (or (whitespace-token p)
+      (string-token p)
+      (hash-token p)
+      (suffix-match-token p)
+      (left-paren-token p)
+      (right-paren-token p)
+      (substring-match-token p)
+      (number-token p)
+      (comma-token p)
+      (cdc-token p)
+      (and (match-comment p)
+	   (consume-token p))
+      (colon-token p)
+      (semicolon-token p)
+      (cdo-token p)
+      (at-keyword-token p)
+      ([-token p)
+      (]-token p)
+      (prefix-match-token p)
+      ({-token p)
+      (}-token p)
+      (unicode-range-token p)
+      (ident-token p)
+      (dash-match-token p)
+      (include-match-token p)
+      (eof-token p)
+      (delim-token p)))
+
+;;  Lexer
+
+(defun lex-stream (stream)
+  (let ((p (make-instance 'parser :stream stream))
+	(document nil))
+    (labels ((push-tokens ()
+	       (let ((token (consume-token p)))
+		 (push token document)
+		 (unless (typep token 'eof-token)
+		   (push-tokens)))))
+      (push-tokens))
+    (nreverse document)))
+
+(defun lex-string (string)
+  (with-input-from-string (stream string)
+    (lex-stream stream)))
+
+(defun lex-file (filespec)
+  (with-open-file (stream filespec
+			  :element-type 'character
+			  :external-format :utf-8)
+    (lex-stream stream)))
+
+;;  Tests
+
+#+test
+(lex-string "/* hello comment world */")
+
+;;  Parsing
+
+	     
