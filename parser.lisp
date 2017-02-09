@@ -118,9 +118,11 @@
   (let* ((length (- end start))
 	 (s (make-string length)))
     (labels ((at (i j)
-	       (unless (= length j)
-		 (setf (char s j) (code-char (aref ib i)))
-		 (at (1+ i) (1+ j)))))
+	       (let ((ib-char (aref ib i)))
+		 (unless (or (= length j)
+			     (= ib-char -1))
+		   (setf (char s j) (code-char ib-char))
+		   (at (1+ i) (1+ j))))))
       (at start 0))))
     
 (defmethod ib-push-extend ((p parser) (c fixnum))
@@ -191,7 +193,7 @@
 
 (defmethod make-token ((p parser) (class symbol) &rest initargs)
   (let ((pt (pop-token p)))
-    (apply #'make-instance 
+    (apply #'make-instance class
 	   :string (token-string pt)
 	   :line (token-line pt)
 	   :character (token-character pt)
@@ -310,9 +312,14 @@
 
 ;;  Productions
 
-(defmethod match-comment ((p parser))
-  (when (match p "/*")
-    (match-until p "*/")))
+(defclass comment-token (token) ())
+
+(defmethod comment-token ((p parser))
+  (push-token p)
+  (if (match p "/*")
+      (progn (match-until p "*/")
+	     (make-token p 'comment-token))
+      (discard-token p)))
 
 (defmethod match-newline ((p parser))
   (or (match p #\Newline)
@@ -748,8 +755,7 @@
       (number-token p)
       (comma-token p)
       (cdc-token p)
-      (and (match-comment p)
-	   (consume-token p))
+      (comment-token p)
       (colon-token p)
       (semicolon-token p)
       (cdo-token p)
@@ -792,7 +798,7 @@
 ;;  Tests
 
 #+test
-(lex-string "/* hello comment world */")
+(lex-string "/* hello world */ body { color: #ff0000; }")
 
 ;;  Parsing
 
