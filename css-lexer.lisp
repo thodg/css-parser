@@ -1,77 +1,6 @@
 
 (in-package :parse-css)
 
-;;  Input buffers
-
-(defun make-input-buffer (&optional string (start 0))
-  (let* ((length (when string (- (length string) start)))
-	 (ib (make-array (if string
-			     (* 64 (ceiling length 64))
-			     64)
-			 :element-type 'fixnum
-			 :adjustable t
-			 :fill-pointer 0)))
-    (when string
-      (setf (fill-pointer ib) length)
-      (replace ib string :start2 start))
-    ib))
-
-;;  Parser
-
-(defclass token ()
-  ((string :initarg :string
-	   :accessor token-string
-	   :type string)
-   (line :initarg :line
-	 :initform 0
-	 :accessor token-line
-	 :type fixnum)
-   (character :initarg :character
-	      :initform 0
-	      :accessor token-character
-	      :type fixnum)))
-
-(defclass parser-token (token)
-  ((start :initarg :start
-	  :accessor token-start
-	  :type fixnum)))
-
-(defclass parser ()
-  ((input :initarg :stream
-	   :reader parser-input
-	   :type stream)
-   (input-line :initarg :input-line
-	       :initform 0
-	       :accessor parser-input-line
-	       :type fixnum)
-   (input-character :initarg :input-character
-		    :initform -1
-		    :accessor parser-input-character
-		    :type fixnum)
-   (eof :initform nil
-	:accessor parser-eof)
-   (ib :initform (make-input-buffer)
-       :accessor parser-ib
-       :type array)
-   (match-start :initform 0
-		:accessor parser-match-start
-		:type fixnum)
-   (token-stack :initform ()
-		:accessor parser-token-stack
-		:type list)))
-
-(defgeneric push-token (parser))
-(defgeneric pop-token (parser))
-(defgeneric make-token (parser class &rest initargs))
-(defgeneric discard-token (parser))
-(defgeneric ib-push-extend (parser character))
-(defgeneric input-char (parser))
-(defgeneric input-length (parser length))
-(defgeneric parser-match-char (parser &optional char-index))
-(defgeneric match (parser item))
-(defgeneric match-until (parser item))
-(defgeneric match-option (parser function))
-(defgeneric match-times (parser function min max))
 (defgeneric match-comment (parser))
 (defgeneric match-newline (parser))
 (defgeneric match-whitespace (parser))
@@ -106,207 +35,53 @@
 (defgeneric cdo-token (parser))
 (defgeneric cdc-token (parser))
 
-;;  Parser input
-
-(defmethod ib-string ((ib array) (start fixnum) (end fixnum))
-  (let* ((length (- end start))
-	 (s (make-string length)))
-    (labels ((at (i j)
-	       (let ((ib-char (aref ib i)))
-		 (unless (or (= length j)
-			     (= ib-char -1))
-		   (setf (char s j) (code-char ib-char))
-		   (at (1+ i) (1+ j))))))
-      (at start 0))))
-    
-(defmethod ib-push-extend ((p parser) (c fixnum))
-  (let ((ib (parser-ib p)))
-    (let* ((fill-pointer (fill-pointer ib))
-	   (new-fill-pointer (1+ fill-pointer)))
-      (if (= fill-pointer (array-dimension ib 0))
-	  (setf (parser-ib p) (adjust-array ib (+ fill-pointer 64)
-					    :fill-pointer new-fill-pointer))
-	  (setf (fill-pointer ib) new-fill-pointer))
-      (locally (declare (optimize (safety 0)))
-	(setf (aref ib fill-pointer) c))
-      fill-pointer)))
-
-(defun read-char-code (stream)
-  (let ((c (read-char stream nil nil)))
-    (if c (char-code c) -1)))
-
-(defmethod input-char ((p parser))
-  (let* ((in (parser-input p))
-	 (c (read-char-code in))
-	 (pos (ib-push-extend p c)))
-    (cond ((or (and (= #x000A c)
-		    (not (and (< 0 pos)
-			      (= #x000D (aref (parser-ib p) (1- pos))))))
-	       (= #x000D c)
-	       (= #x000C c))
-	   (setf (parser-input-character p) 0)
-	   (incf (parser-input-line p)))
-	  (t
-	   (incf (parser-input-character p))))
-    c))
-
-(defmethod input-length ((p parser) (length fixnum))
-  (when (< (- (fill-pointer (parser-ib p))
-	      (parser-match-start p))
-	   length)
-    (input-char p)
-    (input-length p length)))
-
-(defmethod parser-match-char ((p parser) &optional (index 0))
-  (input-length p (1+ index))
-  (aref (parser-ib p) (+ (parser-match-start p) index)))
-
-;;  Token stack
-
-(defmethod push-token ((p parser))
-  (let ((token (make-instance 'parser-token
-			      :start (parser-match-start p)
-			      :line (parser-input-line p)
-			      :character (parser-input-character p))))
-    (push token (parser-token-stack p))))
-
-(defmethod pop-token ((p parser))
-  (assert (parser-token-stack p))
-  (let* ((ib (parser-ib p))
-	 (fill-pointer (fill-pointer ib))
-	 (token (pop (parser-token-stack p)))
-	 (match-start (parser-match-start p)))
-    (setf (token-string token) (ib-string ib
-					  (token-start token)
-					  match-start))
-    (when (endp (parser-token-stack p))
-      (replace ib ib :start2 match-start :end2 fill-pointer)
-      (setf (parser-match-start p) 0
-	    (fill-pointer (parser-ib p)) (- fill-pointer match-start)))
-    token))
-
-(defmethod make-token ((p parser) (class symbol) &rest initargs)
-  (let ((pt (pop-token p)))
-    (apply #'make-instance class
-	   :string (token-string pt)
-	   :line (token-line pt)
-	   :character (token-character pt)
-	   initargs)))
-
-(defmethod discard-token ((p parser))
-  (pop-token p)
-  nil)
-
-;;  Pattern matching
-
-(defmethod ib= ((p parser) (s string) &key (start1 0))
-  (let ((ib (parser-ib p))
-	(end (length s)))
-    (when (<= end (- (fill-pointer ib) start1))
-      (locally (declare (optimize (safety 0)))
-	(labels ((at (m i)
-		   (declare (type fixnum m i))
-		   (cond ((= end i)
-			  t)
-			 ((= (aref ib m) (char-code (char s i)))
-			  (at (the fixnum (1+ m)) (the fixnum (1+ i))))
-			 (t
-			  nil))))
-	  (at start1 0))))))
-
-(defmethod match ((p parser) (s string))
-  (input-length p (length s))
-  (when (ib= p s :start1 (parser-match-start p))
-    (incf (parser-match-start p) (length s))))
-
-(defmethod match ((p parser) (c fixnum))
-  (when (= (the fixnum (parser-match-char p)) c)
-    (incf (parser-match-start p))))
-
-(defmethod match ((p parser) (c character))
-  (match p (char-code c)))
-
-(defmethod match-until ((p parser) (s string))
-  (input-length p (length s))
-  (labels ((maybe-eat ()
-	     (or (match p s)
-		 (and (not (match p -1))
-		      (progn
-			(input-char p)
-			(incf (parser-match-start p))
-			(maybe-eat))))))
-    (maybe-eat)))
-
-(defmethod match-option ((p parser) (f function))
-  (or (funcall f p)
-      (parser-match-start p)))
-
-(defmacro match-not (p &body body)
-  (let ((parser (gensym "PARSER-"))
-	(match-start (gensym "MATCH-START-"))
-	(result (gensym "RESULT-")))
-    `(let* ((,parser ,p)
-	    (,match-start (parser-match-start ,parser))
-	    (,result (progn ,@body)))
-       (cond ((or ,result
-		  (match p -1))
-	      (setf (parser-match-start ,parser) ,match-start)
-	      nil)
-	     (t
-	      (incf (parser-match-start p)))))))
-
-(defmacro match-sequence (p &body body)
-  (let ((parser (gensym "PARSER-"))
-	(match-start (gensym "MATCH-START-"))
-	(result (gensym "RESULT-")))
-    `(let* ((,parser ,p)
-	    (,match-start (parser-match-start ,parser))
-	    (,result (progn ,@body)))
-       (cond (,result
-	      ,result)
-	     (t
-	      (setf (parser-match-start ,parser) ,match-start)
-	      nil)))))
-
-(defmethod match-times ((p parser) (f function) (min fixnum) (max fixnum))
-  (match-sequence p
-    (labels ((match-min ()
-	       (cond ((= 0 min)
-		      (match-max))
-		     ((funcall f p)
-		      (decf min)
-		      (decf max)
-		      (match-min))
-		     (t
-		      nil)))
-	     (match-max ()
-	       (cond ((and (< 0 max) (funcall f p))
-		      (decf max)
-		      (match-max))
-		     (t
-		      (parser-match-start p)))))
-      (match-min))))
-
-(defmethod match-times ((p parser) (f function) (min fixnum) (max null))
-  (match-sequence p
-    (labels ((match-min ()
-	       (cond ((= 0 min)
-		      (match-max))
-		     ((funcall f p)
-		      (decf min)
-		      (match-min))
-		     (t
-		      nil)))
-	     (match-max ()
-	       (cond ((funcall f p)
-		      (match-max))
-		     (t
-		      (parser-match-start p)))))
-      (match-min))))
-
-;;  Productions
+(defclass identified-token (token)
+  ((ident :initarg :ident
+	  :reader token-ident
+	  :type ident-token)))
 
 (defclass comment-token (token) ())
+(defclass whitespace-token (token) ())
+(defclass ident-token (token) ())
+(defclass function-token (identified-token) ())
+(defclass at-keyword-token (identified-token) ())
+(defclass hash-token (token) ())
+(defclass string-token (token) ())
+
+(defclass url-token (identified-token)
+  ((url :initarg :url
+	:reader token-url
+	:type token)))
+
+(defclass number-token (token) ())
+
+(defclass numbered-token (token)
+  ((number :initarg :number
+	   :reader token-number
+	   :type number-token)))
+
+(defclass dimension-token (identified-token numbered-token) ())
+(defclass percentage-token (numbered-token) ())
+(defclass unicode-range-token (token) ())
+(defclass include-match-token (token) ())
+(defclass dash-match-token (token) ())
+(defclass prefix-match-token (token) ())
+(defclass suffix-match-token (token) ())
+(defclass substring-match-token (token) ())
+(defclass column-token (token) ())
+(defclass cdo-token (token) ())
+(defclass cdc-token (token) ())
+(defclass left-paren-token (token) ())
+(defclass right-paren-token (token) ())
+(defclass comma-token (token) ())
+(defclass colon-token (token) ())
+(defclass semicolon-token (token) ())
+(defclass [-token (token) ())
+(defclass ]-token (token) ())
+(defclass {-token (token) ())
+(defclass }-token (token) ())
+(defclass eof-token (token) ())
+(defclass delim-token (token) ())
 
 (defmethod comment-token ((p parser))
   (push-token p)
@@ -342,8 +117,6 @@
 	     (when (not (match-newline p))
 	       (parser-match-start p))))))
 
-(defclass whitespace-token (token) ())
-
 (defmethod whitespace-token ((p parser))
   (push-token p)
   (if (match-times p #'match-whitespace 1 nil)
@@ -352,8 +125,6 @@
 
 (defmethod match-ws* ((p parser))
   (match-option p #'whitespace-token))
-
-(defclass ident-token (token) ())
 
 (defmethod match-ident-char ((p parser))
   (or (match-escape p)
@@ -385,13 +156,6 @@
 	  (t
 	   (discard-token p)))))
 
-(defclass identified-token (token)
-  ((ident :initarg :ident
-	  :reader token-ident
-	  :type ident-token)))
-
-(defclass function-token (identified-token) ())
-
 (defmethod function-token ((p parser))
   (match-sequence p
     (push-token p)
@@ -399,8 +163,6 @@
       (if (and ident (match p #\())
 	  (make-token p 'function-token :ident ident)
 	  (discard-token p)))))
-
-(defclass at-keyword-token (identified-token) ())
 
 (defmethod at-keyword-token ((p parser))
   (match-sequence p
@@ -412,8 +174,6 @@
 	      (discard-token p)))
 	(discard-token p))))
 
-(defclass hash-token (token) ())
-
 (defmethod hash-token ((p parser))
   (match-sequence p
     (push-token p)
@@ -421,8 +181,6 @@
 	(and (match-ident-char* p)
 	     (make-token p 'hash-token))
 	(discard-token p))))
-
-(defclass string-token (token) ())
 
 (defgeneric string-token-string (string-token))
 
@@ -451,11 +209,6 @@
   (if (or (match-string p #\")
 	  (match-string p #\'))
       (make-token p 'string-token)))
-
-(defclass url-token (identified-token)
-  ((url :initarg :url
-	:reader token-url
-	:type token)))
 
 (defmethod match-non-printable ((p parser))
   (let ((c (the fixnum (parser-match-char p))))
@@ -496,8 +249,6 @@
 		   (make-token p (url-token :ident ident :url url)))))))
       (discard-token p)))
 
-(defclass number-token (token) ())
-
 (defmethod match-digit ((p parser))
   (let ((c (the fixnum (parser-match-char p))))
     (when (<= (char-code #\0) c (char-code #\9))
@@ -531,13 +282,6 @@
       (make-token p 'number-token)
       (discard-token p)))
 
-(defclass numbered-token (token)
-  ((number :initarg :number
-	   :reader token-number
-	   :type number-token)))
-
-(defclass dimension-token (identified-token numbered-token) ())
-
 (defmethod dimension-token ((p parser))
   (push-token p)
   (or (match-sequence p
@@ -550,8 +294,6 @@
 			    :ident ident))))))
       (discard-token p)))
 
-(defclass percentage-token (numbered-token) ())
-
 (defmethod percentage-token ((p parser))
   (push-token p)
   (or (match-sequence p
@@ -561,8 +303,6 @@
 	      (make-token p 'percentage-token
 			  :number number)))))
       (discard-token p)))
-
-(defclass unicode-range-token (token) ())
 
 (defmethod unicode-range-token ((p parser))
   (push-token p)
@@ -584,15 +324,11 @@
 	     (make-token p 'unicode-range-token)))
       (discard-token p)))
 
-(defclass include-match-token (token) ())
-
 (defmethod include-match-token ((p parser))
   (push-token p)
   (if (match p "~=")
       (make-token p 'include-match-token)
       (discard-token p)))
-
-(defclass dash-match-token (token) ())
 
 (defmethod dash-match-token ((p parser))
   (push-token p)
@@ -600,15 +336,11 @@
       (make-token p 'dash-match-token)
       (discard-token p)))
 
-(defclass prefix-match-token (token) ())
-
 (defmethod prefix-match-token ((p parser))
   (push-token p)
   (if (match p "^=")
       (make-token p 'prefix-match-token)
       (discard-token p)))
-
-(defclass suffix-match-token (token) ())
 
 (defmethod suffix-match-token ((p parser))
   (push-token p)
@@ -616,15 +348,11 @@
       (make-token p 'suffix-match-token)
       (discard-token p)))
 
-(defclass substring-match-token (token) ())
-
 (defmethod substring-match-token ((p parser))
   (push-token p)
   (if (match p "*=")
       (make-token p 'substring-match-token)
       (discard-token p)))
-
-(defclass column-token (token) ())
 
 (defmethod column-token ((p parser))
   (push-token p)
@@ -632,15 +360,11 @@
       (make-token p 'column-token)
       (discard-token p)))
 
-(defclass cdo-token (token) ())
-
 (defmethod cdo-token ((p parser))
   (push-token p)
   (if (match p "<!--")
       (make-token p 'cdo-token)
       (discard-token p)))
-
-(defclass cdc-token (token) ())
 
 (defmethod cdc-token ((p parser))
   (push-token p)
@@ -648,15 +372,11 @@
       (make-token p 'cdc-token)
       (discard-token p)))
 
-(defclass left-paren-token (token) ())
-
 (defmethod left-paren-token ((p parser))
   (push-token p)
   (if (match p #\()
       (make-token p 'left-paren-token)
       (discard-token p)))
-
-(defclass right-paren-token (token) ())
 
 (defmethod right-paren-token ((p parser))
   (push-token p)
@@ -664,15 +384,11 @@
       (make-token p 'right-paren-token)
       (discard-token p)))
 
-(defclass comma-token (token) ())
-
 (defmethod comma-token ((p parser))
   (push-token p)
   (if (match p #\,)
       (make-token p 'comma-token)
       (discard-token p)))
-
-(defclass colon-token (token) ())
 
 (defmethod colon-token ((p parser))
   (push-token p)
@@ -680,15 +396,11 @@
       (make-token p 'colon-token)
       (discard-token p)))
 
-(defclass semicolon-token (token) ())
-
 (defmethod semicolon-token ((p parser))
   (push-token p)
   (if (match p #\;)
       (make-token p 'semicolon-token)
       (discard-token p)))
-
-(defclass [-token (token) ())
 
 (defmethod [-token ((p parser))
   (push-token p)
@@ -696,15 +408,11 @@
       (make-token p '[-token)
       (discard-token p)))
 
-(defclass ]-token (token) ())
-
 (defmethod ]-token ((p parser))
   (push-token p)
   (if (match p #\])
       (make-token p ']-token)
       (discard-token p)))
-
-(defclass {-token (token) ())
 
 (defmethod {-token ((p parser))
   (push-token p)
@@ -712,23 +420,17 @@
       (make-token p '{-token)
       (discard-token p)))
 
-(defclass }-token (token) ())
-
 (defmethod }-token ((p parser))
   (push-token p)
   (if (match p #\})
       (make-token p '}-token)
       (discard-token p)))
 
-(defclass eof-token (token) ())
-
 (defmethod eof-token ((p parser))
   (push-token p)
   (if (match p -1)
       (make-token p 'eof-token)
       (discard-token p)))
-
-(defclass delim-token (token) ())
 
 (defmethod delim-token ((p parser))
   (push-token p)

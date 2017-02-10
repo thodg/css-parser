@@ -13,6 +13,10 @@
   :description "CSS level 3 parser"
   :depends-on ()
   :components
-  ((:file "defpackage")
-   (:file "lexer" :depends-on ("defpackage"))
-   (:file "parser" :depends-on ("defpackage" "lexer"))))
+  ((:file "package")
+   (:file "parser" :depends-on ("package"))
+   (:file "input" :depends-on ("parser"))
+   (:file "matcher" :depends-on ("parser"))
+   (:file "tokenizer" :depends-on ("parser"))
+   (:file "css-lexer" :depends-on ("input" "matcher" "tokenizer"))
+   (:file "css-parser" :depends-on ("css-lexer"))))
