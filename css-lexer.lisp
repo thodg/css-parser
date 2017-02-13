@@ -438,7 +438,7 @@
   (incf (parser-match-start p))
   (make-token p 'delim-token))
 
-;;  Tokenizer
+;;  CSS lexer
 
 (defmethod consume-token ((p parser))
   (or (whitespace-token p)
@@ -467,8 +467,6 @@
       (include-match-token p)
       (eof-token p)
       (delim-token p)))
-
-;;  Lexer
 
 (defun lex-stream (stream)
   (let ((p (make-instance 'parser :stream stream))
