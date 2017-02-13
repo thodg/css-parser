@@ -41,4 +41,10 @@
 		:type fixnum)
    (token-stack :initform ()
 		:accessor parser-token-stack
-		:type list)))
+		:type list)
+   (ib :initform (make-item-buffer)
+       :accessor parser-ib
+       :type vector)
+   (item-match-start :initform 0
+		     :accessor parser-item-match-start
+		     :type fixnum)))
