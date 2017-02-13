@@ -33,12 +33,12 @@
 		    :type fixnum)
    (eof :initform nil
 	:accessor parser-eof)
-   (ib :initform (make-input-buffer)
-       :accessor parser-ib
+   (cb :initform (make-character-buffer)
+       :accessor parser-cb
        :type array)
-   (match-start :initform 0
-		:accessor parser-match-start
-		:type fixnum)
+   (char-match-start :initform 0
+		     :accessor parser-char-match-start
+		     :type fixnum)
    (token-stack :initform ()
 		:accessor parser-token-stack
 		:type list)

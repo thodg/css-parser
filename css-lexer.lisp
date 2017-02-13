@@ -106,16 +106,16 @@
     (when (or (<= (char-code #\0) c (char-code #\9))
 	      (<= (char-code #\a) c (char-code #\f))
 	      (<= (char-code #\A) c (char-code #\F)))
-      (incf (parser-match-start p)))))
+      (incf (parser-char-match-start p)))))
        
 (defmethod match-escape ((p parser))
   (match-sequence p
     (and (match p #\\)
 	 (or (when (match-times p #'match-hex-digit 1 6)
 	       (match-whitespace p)
-	       (parser-match-start p))
+	       (parser-char-match-start p))
 	     (when (not (match-newline p))
-	       (parser-match-start p))))))
+	       (parser-char-match-start p))))))
 
 (defmethod whitespace-token ((p parser))
   (push-token p)
@@ -135,7 +135,7 @@
 		  (=  (char-code #\_) c)
 		  (=  (char-code #\-) c)
 		  (<  #x007F c))
-	  (incf (parser-match-start p))))))
+	  (incf (parser-char-match-start p))))))
 
 (defmethod match-ident-char* ((p parser))
   (match-times p #'match-ident-char 0 nil))
@@ -150,7 +150,7 @@
 			   (<= (char-code #\A) c (char-code #\Z))
 			   (=  (char-code #\_) c)
 			   (<  #x007F c))
-		   (incf (parser-match-start p)))))
+		   (incf (parser-char-match-start p)))))
 	   (match-ident-char* p)
 	   (make-token p 'ident-token))
 	  (t
@@ -216,7 +216,7 @@
 	      (=  #x000B c)
 	      (<= #x000E c #x001F)
 	      (=  #x007F c))
-      (incf (parser-match-start p)))))
+      (incf (parser-char-match-start p)))))
 
 (defmethod match-url-unquoted-char ((p parser))
   (or (match-escape p)
@@ -252,7 +252,7 @@
 (defmethod match-digit ((p parser))
   (let ((c (the fixnum (parser-match-char p))))
     (when (<= (char-code #\0) c (char-code #\9))
-      (incf (parser-match-start p)))))
+      (incf (parser-char-match-start p)))))
 
 (defmethod match-digit+ ((p parser))
   (match-times p #'match-digit 1 nil))
@@ -278,7 +278,7 @@
 			    (match p #\+)
 			    t)
 			(match-digit+ p)))
-		 (parser-match-start p))))
+		 (parser-char-match-start p))))
       (make-token p 'number-token)
       (discard-token p)))
 
@@ -315,9 +315,9 @@
 			(match p #\-)
 			(match-times p #'match-hex-digit 1 6)))
 		 (match-sequence p
-		   (let ((start (parser-match-start p)))
+		   (let ((start (parser-char-match-start p)))
 		     (and (match-times p #'match-hex-digit 0 5)
-			  (let ((digits (- (parser-match-start p) start)))
+			  (let ((digits (- (parser-char-match-start p) start)))
 			    (match-times p (lambda (p) (match p #\?))
 					 1 (- 6 digits))))))
 		 (match-times p #'match-hex-digit 1 6))
@@ -435,7 +435,7 @@
 (defmethod delim-token ((p parser))
   (push-token p)
   (input-length p 1)
-  (incf (parser-match-start p))
+  (incf (parser-char-match-start p))
   (make-token p 'delim-token))
 
 ;;  CSS lexer
