@@ -88,6 +88,36 @@
       (incf (parser-item-match-start p))
       item)))
 
+(defmethod push-item ((p parser))
+  (push (parser-item-match-start p) (parser-item-stack p)))
+
+(defmethod pop-item ((p parser))
+  (assert (parser-item-stack p))
+  (let* ((cb (parser-cb p))
+	 (fill-pointer (fill-pointer cb))
+	 (item (pop (parser-item-stack p)))
+	 (match-start (parser-char-match-start p)))
+    (setf (item-string item) (cb-string cb
+					  (item-start item)
+					  match-start))
+    (when (endp (parser-item-stack p))
+      (replace cb cb :start2 match-start :end2 fill-pointer)
+      (setf (parser-char-match-start p) 0
+	    (fill-pointer (parser-cb p)) (- fill-pointer match-start)))
+    item))
+
+(defmethod make-item ((p parser) (class symbol) &rest initargs)
+  (let ((pt (pop-item p)))
+    (apply #'make-instance class
+	   :string (item-string pt)
+	   :line (item-line pt)
+	   :character (item-character pt)
+	   initargs)))
+
+(defmethod discard-item ((p parser))
+  (pop-item p)
+  nil)
+
 ;;  Parsing
 
 (defgeneric parser-error (parser message))

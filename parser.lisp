@@ -47,4 +47,7 @@
        :type vector)
    (item-match-start :initform 0
 		     :accessor parser-item-match-start
-		     :type fixnum)))
+		     :type fixnum)
+   (item-stack :initform ()
+	       :accessor parser-item-stack
+	       :type list)))
