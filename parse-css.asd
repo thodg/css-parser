@@ -9,14 +9,17 @@
 (defsystem :parse-css
   :name "parse-css"
   :author "Thomas de Grivel <thoxdg@gmail.com>"
-  :version "0.1"
+  :version "0.2"
   :description "CSS level 3 parser"
-  :depends-on ()
+  :depends-on ("css-lexer" "str")
   :components
   ((:file "package")
    (:file "parser" :depends-on ("package"))
-   (:file "input" :depends-on ("parser"))
-   (:file "matcher" :depends-on ("parser"))
-   (:file "tokenizer" :depends-on ("parser"))
-   (:file "css-lexer" :depends-on ("input" "matcher" "tokenizer"))
-   (:file "css-parser" :depends-on ("css-lexer"))))
+   (:file "css-parser" :depends-on ("parser"))))
+
+(defsystem :parse-css/test
+  :depends-on ("babel-stream"
+               "parse-css"
+               "unistd-stream")
+  :components
+  ((:file "test")))
