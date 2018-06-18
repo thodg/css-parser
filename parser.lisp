@@ -56,7 +56,10 @@
 
 (defmethod parser-token ((pr parser) (index integer))
   (declare (type fixnum index))
-  (aref (the (vector token) (parser-buffer pr)) index))
+  (let ((buf (parser-buffer pr)))
+    (declare (type (vector token) buf))
+    (when (< index (fill-pointer buf))
+      (aref buf index))))
 
 (defmethod parser-input ((pr parser))
   (let ((in (stream-underlying-stream pr)))
