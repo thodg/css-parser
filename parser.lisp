@@ -98,7 +98,7 @@
 
 (defmethod match ((pr parser) (type symbol))
   (let ((item (parser-match-token pr 0)))
-    (when (subtypep (type-of item) (find-class type))
+    (when (and item (subtypep (type-of item) (find-class type)))
       (incf (the fixnum (parser-match-start pr)))
       item)))
 
