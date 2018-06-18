@@ -123,8 +123,9 @@
            nil)
           (t
            (let ((token (parser-match-token pr 0)))
-             (incf (the fixnum (parser-match-start pr)))
-             token)))))
+             (when token
+               (incf (the fixnum (parser-match-start pr)))
+               token))))))
 
 (defmacro match-sequence (parser &body body)
   (let ((pr (gensym "PR-"))
