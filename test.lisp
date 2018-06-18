@@ -24,11 +24,11 @@
     (stream-read css)))
 
 (defun test-file (path)
-  (with-stream (in (css-lexer
-                    (babel-input-stream
-                     (unistd-stream-open path :read t))))
-    (let ((parser (make-instance 'parser :stream in)))
-      (stream-read parser))))
+  (with-stream (css (css-parser
+                     (css-lexer
+                      (babel-input-stream
+                       (unistd-stream-open path :read t)))))
+    (stream-read css)))
 
 (defun run ()
   (simple-test))
