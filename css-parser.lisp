@@ -163,20 +163,16 @@
       (when name
         (let ((prop (make-instance 'css-declaration
                                    :name (token-string name))))
-          (trace match)
-          (unwind-protect
-               (progn
-                 (match pr 'whitespace-token)
-                 (when (match pr 'colon-token)
-                   (loop
-                      (match pr 'whitespace-token)
-                      (when (or (match pr 'semicolon-token)
-                                (typep (parser-match-token pr 0) '}-token))
-                        (return prop))
-                      (let ((value (parse-preserved-token pr)))
-                        (when value
-                          (push value (item-values prop)))))))
-            (untrace match)))))))
+          (match pr 'whitespace-token)
+          (when (match pr 'colon-token)
+            (loop
+               (match pr 'whitespace-token)
+               (when (or (match pr 'semicolon-token)
+                         (typep (parser-match-token pr 0) '}-token))
+                 (return prop))
+               (let ((value (parse-preserved-token pr)))
+                 (when value
+                   (push value (item-values prop)))))))))))
   
 (defmethod parse-at-rule ((pr parser) &key toplevel)
   (parser-push pr)
