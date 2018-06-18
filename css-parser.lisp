@@ -90,10 +90,12 @@
 
 (defmethod parser-error ((pr parser) &rest message)
   (let ((token (parser-token pr 0)))
-    (error "CSS error ~A:~A ~A"
-           (token-line token)
-           (token-character token)
-           (str message))))
+    (if token
+        (error "CSS error ~A:~A ~A"
+               (token-line token)
+               (token-character token)
+               (str message))
+        (error "CSS error ~A" (str message)))))
 
 (defmethod parse-component-value ((pr parser))
   (or (parse-function-block pr)
