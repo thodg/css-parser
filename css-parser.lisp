@@ -76,19 +76,19 @@
 
 ;;  Parsing
 
-(defgeneric parser-error (parser &rest message))
-(defgeneric parse-at-rule (parser &key toplevel))
-(defgeneric parse-qualified-rule (parser &key toplevel))
-(defgeneric parse-declaration (parser))
-(defgeneric parse-component-value (parser))
-(defgeneric parse-component-value* (parser))
-(defgeneric parse-{}-block (parser))
-(defgeneric parse-paren-block (parser))
-(defgeneric parse-[]-block (parser))
-(defgeneric parse-function-block (parser))
-(defgeneric parse-preserved-token (parser))
+(defgeneric parser-error (css-parser &rest message))
+(defgeneric parse-at-rule (css-parser &key toplevel))
+(defgeneric parse-qualified-rule (css-parser &key toplevel))
+(defgeneric parse-declaration (css-parser))
+(defgeneric parse-component-value (css-parser))
+(defgeneric parse-component-value* (css-parser))
+(defgeneric parse-{}-block (css-parser))
+(defgeneric parse-paren-block (css-parser))
+(defgeneric parse-[]-block (css-parser))
+(defgeneric parse-function-block (css-parser))
+(defgeneric parse-preserved-token (css-parser))
 
-(defmethod parser-error ((pr parser) &rest message)
+(defmethod parser-error ((pr css-parser) &rest message)
   (let ((token (parser-token pr 0)))
     (if token
         (error "CSS error ~A:~A ~A"
@@ -97,14 +97,14 @@
                (str message))
         (error "CSS error ~A" (str message)))))
 
-(defmethod parse-component-value ((pr parser))
+(defmethod parse-component-value ((pr css-parser))
   (or (parse-function-block pr)
       (parse-[]-block pr)
       (parse-paren-block pr)
       (parse-declaration pr)
       (parse-preserved-token pr)))
 
-(defmethod parse-component-value* ((pr parser))
+(defmethod parse-component-value* ((pr css-parser))
   (let ((values ()))
     (loop (or (match pr 'whitespace-token)
               (let ((value (parse-component-value pr)))
@@ -113,7 +113,7 @@
               (return)))
     (nreverse values)))
 
-(defmethod parse-{}-block ((pr parser))
+(defmethod parse-{}-block ((pr css-parser))
   (match-sequence pr
     (when (match pr '{-token)
       (let ((values (parse-component-value* pr)))
@@ -122,7 +122,7 @@
               (setf (item-items (parser-item pr)) values)
               (parser-error pr "expected '}'")))))))
 
-(defmethod parse-paren-block ((pr parser))
+(defmethod parse-paren-block ((pr css-parser))
   (match-sequence pr
     (when (match pr 'left-paren-token)
       (let ((values (parse-component-value* pr)))
@@ -130,7 +130,7 @@
             (make-instance 'paren-block :values values)
             (parser-error pr "expected ')'"))))))
 
-(defmethod parse-[]-block ((pr parser))
+(defmethod parse-[]-block ((pr css-parser))
   (match-sequence pr
     (when (match pr '[-token)
       (let ((values (parse-component-value* pr)))
@@ -138,7 +138,7 @@
             (make-instance '[]-block :values values)
             (parser-error pr "expected ']'"))))))
 
-(defmethod parse-function-block ((pr parser))
+(defmethod parse-function-block ((pr css-parser))
   (match-sequence pr
     (let ((fun (match pr 'function-token)))
       (when fun
@@ -149,14 +149,14 @@
                              :values values)
               (parser-error pr "expected ')'")))))))
 
-(defmethod parse-preserved-token ((pr parser))
+(defmethod parse-preserved-token ((pr css-parser))
   (match-not pr (lambda (pr)
                   (match-or pr '({-token }-token
                                  [-token ]-token
                                  left-paren-token right-paren-token
                                  eof-token)))))
 
-(defmethod parse-declaration ((pr parser))
+(defmethod parse-declaration ((pr css-parser))
   (match-sequence pr
     (match pr 'whitespace-token)
     (let ((name (parse-preserved-token pr)))
@@ -174,7 +174,7 @@
                  (when value
                    (push value (item-values prop)))))))))))
   
-(defmethod parse-at-rule ((pr parser) &key toplevel)
+(defmethod parse-at-rule ((pr css-parser) &key toplevel)
   (parser-push pr)
   (let ((at-keyword (match pr 'at-keyword-token)))
     (when at-keyword
@@ -196,14 +196,14 @@
 	       (parser-pop pr)
 	       nil))))))
 
-(defmethod parse-rule-list ((pr parser))
+(defmethod parse-rule-list ((pr css-parser))
   (if (or (parse-at-rule pr)
 	  (parse-qualified-rule pr)
 	  (match pr 'whitespace-token))
       (parse-rule-list pr))
       t)
 
-(defmethod parse-qualified-rule ((pr parser) &key toplevel)
+(defmethod parse-qualified-rule ((pr css-parser) &key toplevel)
   (match-sequence pr
     (let* ((parent (parser-item pr))
            (prelude (parse-component-value* pr))
@@ -220,7 +220,7 @@
         (when block
           item)))))
 
-(defmethod parse-stylesheet ((pr parser))
+(defmethod parse-stylesheet ((pr css-parser))
   (let ((stylesheet (make-instance 'stylesheet :parent nil)))
     (setf (parser-item pr) stylesheet)
     (loop
@@ -234,7 +234,7 @@
       (parser-error pr "at top level"))
     stylesheet))
 
-(defmethod parser-parse ((pr parser))
+(defmethod parser-parse ((pr css-parser))
   (parse-stylesheet pr))
 
 (defun css-parser (stream)
