@@ -1,25 +1,24 @@
 
 (in-package :common-lisp-user)
 
-(defpackage :parse-css.system
+(defpackage :css-parser.system
   (:use :common-lisp :asdf))
 
-(in-package :parse-css.system)
+(in-package :css-parser.system)
 
-(defsystem :parse-css
-  :name "parse-css"
+(defsystem :css-parser
+  :name "css-parser"
   :author "Thomas de Grivel <thoxdg@gmail.com>"
   :version "0.2"
   :description "CSS level 3 parser"
-  :depends-on ("css-lexer" "str")
+  :depends-on ("css-lexer" "parser-stream" "str")
   :components
   ((:file "package")
-   (:file "parser" :depends-on ("package"))
-   (:file "css-parser" :depends-on ("parser"))))
+   (:file "css-parser" :depends-on ("package"))))
 
-(defsystem :parse-css/test
+(defsystem :css-parser/test
   :depends-on ("babel-stream"
-               "parse-css"
+               "css-parser"
                "unistd-stream")
   :components
   ((:file "test")))

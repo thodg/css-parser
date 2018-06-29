@@ -1,10 +1,11 @@
 
 (in-package :common-lisp-user)
 
-(defpackage :parse-css
+(defpackage :css-parser
   (:use :cl-stream
         :common-lisp
         :css-lexer
+        :parser-stream
         :str)
   #.(cl-stream:shadowing-import-from)
   (:export

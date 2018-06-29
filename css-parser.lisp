@@ -1,5 +1,5 @@
 
-(in-package :parse-css)
+(in-package :css-parser)
 
 (defclass css-item (item)
   ((parent :initarg :parent
@@ -69,7 +69,7 @@
 	     :reader item-function
 	     :type function-token)))
 
-(defclass css-parser (parser)
+(defclass css-parser (parser-stream)
   ((item :initform (make-instance 'stylesheet)
          :accessor parser-item
          :type css-item)))
@@ -240,7 +240,8 @@
 (defun css-parser (stream)
   (make-instance 'css-parser :stream stream))
 
-(trace
+#+nil
+(untrace
  item-append
  ;match-not
  ;match-or
