@@ -69,7 +69,7 @@
 	     :reader item-function
 	     :type function-token)))
 
-(defclass css-parser (parser-stream)
+(defclass css-parser (parser)
   ((item :initform (make-instance 'stylesheet)
          :accessor parser-item
          :type css-item)))
