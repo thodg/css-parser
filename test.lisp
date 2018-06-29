@@ -1,12 +1,12 @@
 
 (in-package :common-lisp-user)
 
-(defpackage :parse-css/test
+(defpackage :css-parser/test
   (:use :babel-stream
         :cl-stream
         :common-lisp
         :css-lexer
-        :parse-css
+        :css-parser
         :unistd-stream)
   #.(cl-stream:shadowing-import-from)
   (:export
@@ -14,7 +14,7 @@
    #:simple-test
    #:test-file))
 
-(in-package :parse-css/test)
+(in-package :css-parser/test)
 
 (defun simple-test ()
   (with-stream (css (css-parser
